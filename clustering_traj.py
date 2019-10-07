@@ -46,110 +46,51 @@ def get_mol_info(mol):
   return np.asarray(q_atoms), np.asarray(q_all)
 
 
+def get_atom_dist(r1, r2):
+  return np.linalg.norm(np.asarray(r1)-np.asarray(r2))
+
+
+def get_adists_mol(mol):
+  adist = []
+
+  for idx1, atom1 in enumerate(mol.atoms):
+    for idx2, atom2 in enumerate(mol.atoms):
+      if idx2 <= idx1:
+        break
+
+      adist.append(get_atom_dist(atom1.coords, atom2.coords))
+
+  return sorted(adist)
+
+
 def build_distance_matrix(trajfile, noh, reorder, natoms, nprocs):
   # create iterator containing information to compute a line of the distance matrix
-  inputiterator = zip(itertools.count(), map(lambda x: get_mol_info(x), pybel.readfile(os.path.splitext(trajfile)[1][1:], trajfile)), itertools.repeat(trajfile), itertools.repeat(noh), itertools.repeat(reorder), itertools.repeat(natoms))
+  # inputiterator = zip(itertools.count(), itertools.repeat(adists_dict), itertools.repeat(trajfile), itertools.repeat(noh), itertools.repeat(reorder), itertools.repeat(natoms))
 
   # create the pool with nprocs processes to compute the distance matrix in parallel
   p = multiprocessing.Pool(processes = nprocs)
 
+  # calculate the atom distances
+  adists = p.map(get_adists_mol, pybel.readfile(os.path.splitext(trajfile)[1][1:], trajfile))
+
   # build the distance matrix in parallel
-  ldistmat = p.starmap(compute_distmat_line, inputiterator)
+  inputiterator = zip(itertools.count(), itertools.repeat(adists))  
+  ldistmat = p.startmap(compute_distmat_line, inputiterator)
 
   return np.asarray([x for n in ldistmat if len(n) > 0 for x in n])
 
 
-def compute_distmat_line(idx1, q_info, trajfile, noh, reorder, nsatoms):
-  # unpack q_info tuple
-  q_atoms, q_all = q_info
-
+def compute_distmat_line(idx1, adists):
   # initialize distance matrix
   distmat = []
 
-  for idx2, mol2 in enumerate(pybel.readfile(os.path.splitext(trajfile)[1][1:], trajfile)):
+  for idx2 in range(len(adists)):
     # skip if it's not an element from the superior diagonal matrix
     if idx1 >= idx2:
       continue 
 
-    # arrays for second molecule
-    p_atoms, p_all = get_mol_info(mol2)
-
-    # consider the H or not consider depending on option
-    if nsatoms:
-      # get the number of non hydrogen atoms in the solute to subtract if needed
-      if noh:
-        natoms = len(np.where(p_atoms[:nsatoms] != 'H')[0])
-      else:
-        natoms = nsatoms
-
-      if noh:
-        not_hydrogens = np.where(p_atoms != 'H')
-        P = p_all[not_hydrogens]
-        Q = q_all[not_hydrogens]
-        Pa = p_atoms[not_hydrogens]
-        Qa = q_atoms[not_hydrogens]
-      else:
-        P = p_all
-        Q = q_all
-        Pa = p_atoms
-        Qa = q_atoms        
-
-      pcenter = rmsd.centroid(P[:natoms])
-      qcenter = rmsd.centroid(Q[:natoms])
-    elif noh:
-      not_hydrogens = np.where(p_atoms != 'H')
-      P = p_all[not_hydrogens]
-      Q = q_all[not_hydrogens]
-      Pa = p_atoms[not_hydrogens]
-      Qa = q_atoms[not_hydrogens]
-      pcenter = rmsd.centroid(P)
-      qcenter = rmsd.centroid(Q)
-    else:
-      P = p_all
-      Q = q_all
-      Pa = p_atoms
-      Qa = q_atoms
-      pcenter = rmsd.centroid(P)
-      qcenter = rmsd.centroid(Q)
-
-    # center the coordinates at the origin
-    P -= pcenter
-    Q -= qcenter
-
-    # generate rotation to superpose the solute configuration
-    if nsatoms:
-      # center the coordinates at the solute
-      P -= rmsd.centroid(Q[:natoms])
-
-      # reorder solute atoms
-      prr = reorder(Qa[:natoms], Pa[:natoms], Q[:natoms], P[:natoms])
-      prr = np.concatenate((prr,np.arange(len(P)-natoms)+natoms))
-      P = P[prr]
-      Pa = Pa[prr]
-
-      # generate a rotation considering only the solute atoms
-      U = rmsd.kabsch(P[:natoms], Q[:natoms])
-
-      # rotate the whole system with this rotation
-      P = np.dot(P, U)
-
-      # consider only the solvent atoms in the reorder
-      prr = reorder(Qa[natoms:], Pa[natoms:], Q[natoms:], P[natoms:])
-      prr += natoms
-      prr = np.concatenate((np.arange(natoms),prr))
-      Pr = P[prr]
-      Pra = Pa[prr]
-    # reorder the atoms if necessary
-    elif reorder:
-      prr = reorder(Qa, Pa, Q, P)
-      Pr = P[prr]
-      Pra = Pa[prr]
-    else:
-      Pr = P
-      Pra = Pa
-
-    # get the RMSD and store it
-    distmat.append(rmsd.kabsch_rmsd(Pr, Q))
+    # get the distance and store
+    distmat.append(np.sum(np.asarray(adist[idx1])-np.asarray(adist[idx2])))
 
   return distmat
 
