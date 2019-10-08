@@ -53,15 +53,20 @@ def get_atom_dist(r1, r2):
 def get_adists_mol(mol):
   adist = []
 
-  for idx1, atom1 in enumerate(mol.atoms):
-    for idx2, atom2 in enumerate(mol.atoms):
-      if idx2 <= idx1:
-        break
+  for idx1 in mol:
+    for idx2 in mol:
+      if idx1 <= idx2:
+        continue
 
-      adist.append(get_atom_dist(atom1.coords, atom2.coords))
+      adist.append(get_atom_dist(mol[idx1][1], mol[idx2][1]))
 
   return sorted(adist)
 
+def wrapmol(mol):
+  dictmol = {}
+  for idx, atom in enumerate(mol.atoms):
+    dictmol[idx] = [atom.atomicnum, atom.coords]
+  return dictmol
 
 def build_distance_matrix(trajfile, noh, reorder, natoms, nprocs):
   # create iterator containing information to compute a line of the distance matrix
@@ -71,11 +76,11 @@ def build_distance_matrix(trajfile, noh, reorder, natoms, nprocs):
   p = multiprocessing.Pool(processes = nprocs)
 
   # calculate the atom distances
-  adists = p.map(get_adists_mol, pybel.readfile(os.path.splitext(trajfile)[1][1:], trajfile))
+  adists = p.map(get_adists_mol, map(lambda x: wrapmol(x), pybel.readfile(os.path.splitext(trajfile)[1][1:], trajfile)))
 
   # build the distance matrix in parallel
   inputiterator = zip(itertools.count(), itertools.repeat(adists))  
-  ldistmat = p.startmap(compute_distmat_line, inputiterator)
+  ldistmat = p.starmap(compute_distmat_line, inputiterator)
 
   return np.asarray([x for n in ldistmat if len(n) > 0 for x in n])
 
