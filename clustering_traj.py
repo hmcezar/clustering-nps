@@ -26,46 +26,56 @@ import multiprocessing
 import itertools
 
 
+# https://stackoverflow.com/a/25830011/3254658
+def initialize_adists(_adists):
+  global adists
+  adists = _adists
+
+
+def initialize_mollist(_mollist):
+  global mollist
+  mollist = _mollist
+
+
+def initialize_mollist_distmat(_mollist, _distmat, _clusters):
+  global mollist, distmat, clusters
+  mollist = _mollist
+  distmat = _distmat
+  clusters = _clusters
+
+
 def get_atom_dist(r1, r2):
   return np.linalg.norm(np.asarray(r1)-np.asarray(r2))
 
 
-def get_adists_mol(mol):
+def get_adists_mol(idxmol):
   adist = []
 
-  for idx1 in mol:
-    for idx2 in mol:
+  for idx1, atom1 in enumerate(mollist[idxmol].atoms):
+    for idx2, atom2 in enumerate(mollist[idxmol].atoms):
       if idx1 <= idx2:
         continue
 
-      adist.append(get_atom_dist(mol[idx1][1], mol[idx2][1]))
+      adist.append(get_atom_dist(atom1.coords, atom2.coords))
 
   return sorted(adist)
 
 
-def wrapmol(mol):
-  dictmol = {}
-  for idx, atom in enumerate(mol.atoms):
-    dictmol[idx] = [atom.atomicnum, atom.coords]
-  return dictmol
-
-
-def build_distance_matrix(trajfile, nprocs):
-  # create the pool with nprocs processes to compute the distance matrix in parallel
-  p = multiprocessing.Pool(processes = nprocs)
-
-  # calculate the atom distances and create iterator
-  adists = p.map(get_adists_mol, map(lambda x: wrapmol(x), pybel.readfile(os.path.splitext(trajfile)[1][1:], trajfile)))
-
-  inputiterator = zip(itertools.count(), itertools.repeat(adists, len(adists)))
+def build_distance_matrix(mollist, nprocs):
+  # calculate the atom distances
+  pp = multiprocessing.Pool(processes = nprocs, initializer = initialize_mollist, initargs = (mollist,))
+  adists = pp.map(get_adists_mol, range(len(mollist)), 10)
+  pp.close()
 
   # build the distance matrix in parallel
-  ldistmat = p.starmap(compute_distmat_line, inputiterator)
+  p = multiprocessing.Pool(processes = nprocs, initializer = initialize_adists, initargs = (adists,))
+  ldistmat = p.map(compute_distmat_line, range(len(adists)), 10)
+  p.close()
 
   return np.asarray([x for n in ldistmat if len(n) > 0 for x in n])
 
 
-def compute_distmat_line(idx1, adists):
+def compute_distmat_line(idx1):
   # initialize distance matrix
   distmat = []
 
@@ -76,45 +86,37 @@ def compute_distmat_line(idx1, adists):
   return distmat
 
 
-def save_clusters_config(trajfile, clusters, distmat, outbasename, outfmt):
+def save_clusterfile(cidx, outbasename, outfmt):
+  # create object to output the configurations
+  outfile = pybel.Outputfile(outfmt, outbasename+"_"+str(cidx)+"."+outfmt)
 
+  # creates mask with True only for the members of cluster number cidx
+  mask = np.array([1 if i==cidx else 0 for i in clusters], dtype=bool)
+
+  # gets the member with smallest sum of distances from the submatrix
+  idx = np.argmin(sum(distmat[:,mask][mask,:]))
+
+  # get list with the members of this cluster only and store medoid
+  sublist=[num for (num, cluster) in enumerate(clusters) if cluster==cidx]
+  medoid = sublist[idx]
+
+  # print the medoid coordinates
+  outfile.write(mollist[medoid])
+
+  # print the coordinates of the other NPs
+  for idx in sublist:
+    outfile.write(mollist[idx])
+
+  # closes the file for the cidx cluster
+  outfile.close()
+
+
+def save_clusters_config(mollist, clusters, distmat, outbasename, outfmt, nprocs):
   # complete distance matrix
   sqdistmat = squareform(distmat)
   
-  for cnum in range(1,max(clusters)+1):
-
-    # create object to output the configurations
-    outfile = pybel.Outputfile(outfmt,outbasename+"_"+str(cnum)+"."+outfmt)
-
-    # creates mask with True only for the members of cluster number cnum
-    mask = np.array([1 if i==cnum else 0 for i in clusters], dtype=bool)
-
-    # gets the member with smallest sum of distances from the submatrix
-    idx = np.argmin(sum(sqdistmat[:,mask][mask,:]))
-
-    # get list with the members of this cluster only and store medoid
-    sublist=[num for (num, cluster) in enumerate(clusters) if cluster==cnum]
-    medoid = sublist[idx]
-
-    # print the medoid coordinates
-    for idx, mol in enumerate(pybel.readfile(os.path.splitext(trajfile)[1][1:], trajfile)):
-
-      if idx != medoid:
-        continue
-
-      outfile.write(mol)
-      break
-
-    # print the coordinates of the other NPs
-    for idx, mol in enumerate(pybel.readfile(os.path.splitext(trajfile)[1][1:], trajfile)):
-
-      if not mask[idx] or idx == medoid:
-        continue
-
-      outfile.write(mol)
-
-    # closes the file for the cnum cluster
-    outfile.close()
+  p = multiprocessing.Pool(processes = nprocs, initializer = initialize_mollist_distmat, initargs = (mollist, sqdistmat, clusters))
+  p.starmap_async(save_clusterfile, zip(range(1,max(clusters)+1), itertools.repeat(outbasename), itertools.repeat(outfmt)))
 
 
 def check_positive(value):
@@ -175,8 +177,11 @@ if __name__ == '__main__':
     distmat = np.loadtxt(args.input)
   # build a distance matrix already in the condensed form
   else:
-    print('\nCalculating distance matrix\n')
-    distmat = build_distance_matrix(args.trajectory_file, args.nprocesses)
+    print('\nReading trajectory\n')
+    # create list with all the mol objects
+    mollist = list(pybel.readfile(os.path.splitext(args.trajectory_file)[1][1:], args.trajectory_file))
+    print('Calculating distance matrix\n')
+    distmat = build_distance_matrix(mollist, args.nprocesses)
     print('Saving condensed distance matrix to %s\n' % args.outputdistmat.name)
     np.savetxt(args.outputdistmat, distmat, fmt='%.18f')
 
@@ -191,8 +196,10 @@ if __name__ == '__main__':
 
   # get the elements closest to the centroid (see https://stackoverflow.com/a/39870085/3254658)
   if args.clusters_configurations:
+    if not mollist:
+      mollist = list(pybel.readfile(os.path.splitext(args.trajectory_file)[1][1:], args.trajectory_file))
     print("Writing superposed configurations per cluster to files %s\n" % (os.path.splitext(args.outputclusters.name)[0]+"_confs"+"_*"+"."+args.clusters_configurations))
-    save_clusters_config(args.trajectory_file, clusters, distmat, os.path.splitext(args.outputclusters.name)[0]+"_confs", args.clusters_configurations)
+    save_clusters_config(mollist, clusters, distmat, os.path.splitext(args.outputclusters.name)[0]+"_confs", args.clusters_configurations, args.nprocesses)
 
   if args.plot:
     # plot evolution with o cluster in trajectory
