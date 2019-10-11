@@ -61,10 +61,35 @@ def get_adists_mol(idxmol):
   return sorted(adist)
 
 
+def get_adists_mol_sp(idxmol):
+  adist = {}
+
+  for idx1, atom1 in enumerate(mollist[idxmol].atoms):
+    for idx2, atom2 in enumerate(mollist[idxmol].atoms):
+      if idx1 <= idx2:
+        continue
+
+      if atom1.atomicnum < atom2.atomicnum:
+        spsp = int(str(atom1.atomicnum)+str(atom2.atomicnum))
+      else:
+        spsp = int(str(atom2.atomicnum)+str(atom1.atomicnum))
+
+      if spsp not in adist:
+        adist[spsp] = [get_atom_dist(atom1.coords, atom2.coords)]
+      else:
+        adist[spsp].append(get_atom_dist(atom1.coords, atom2.coords))
+
+  radists = []
+  for spsp in sorted(adist):
+    radists += sorted(adist[spsp])
+
+  return radists
+
+
 def build_distance_matrix(mollist, nprocs):
   # calculate the atom distances
   pp = multiprocessing.Pool(processes = nprocs, initializer = initialize_mollist, initargs = (mollist,))
-  adists = pp.map(get_adists_mol, range(len(mollist)), 10)
+  adists = pp.map(get_adists_mol_sp, range(len(mollist)), 10)
   pp.close()
 
   # build the distance matrix in parallel
