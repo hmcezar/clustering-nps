@@ -89,12 +89,12 @@ def get_adists_mol_sp(idxmol):
 def build_distance_matrix(mollist, nprocs):
   # calculate the atom distances
   pp = multiprocessing.Pool(processes = nprocs, initializer = initialize_mollist, initargs = (mollist,))
-  adists = pp.map(get_adists_mol_sp, range(len(mollist)), 10)
+  adists = pp.map(get_adists_mol, range(len(mollist)), 50)
   pp.close()
 
   # build the distance matrix in parallel
   p = multiprocessing.Pool(processes = nprocs, initializer = initialize_adists, initargs = (adists,))
-  ldistmat = p.map(compute_distmat_line, range(len(adists)), 10)
+  ldistmat = p.map(compute_distmat_line, range(len(adists)), 50)
   p.close()
 
   return np.asarray([x for n in ldistmat if len(n) > 0 for x in n])
@@ -209,6 +209,7 @@ if __name__ == '__main__':
     distmat = build_distance_matrix(mollist, args.nprocesses)
     print('Saving condensed distance matrix to %s\n' % args.outputdistmat.name)
     np.savetxt(args.outputdistmat, distmat, fmt='%.18f')
+    args.outputdistmat.close()
 
   # linkage
   print("Starting clustering using '%s' method to join the clusters\n" % args.method)
@@ -218,6 +219,7 @@ if __name__ == '__main__':
   clusters = hcl.fcluster(Z, float(args.min_rmsd), criterion='distance')
   print("Saving clustering classification to %s\n" % args.outputclusters.name)
   np.savetxt(args.outputclusters, clusters, fmt='%d')
+  args.outputclusters.close()
 
   # get the elements closest to the centroid (see https://stackoverflow.com/a/39870085/3254658)
   if args.clusters_configurations:
@@ -227,6 +229,7 @@ if __name__ == '__main__':
     save_clusters_config(mollist, clusters, distmat, os.path.splitext(args.outputclusters.name)[0]+"_confs", args.clusters_configurations, args.nprocesses)
 
   if args.plot:
+    print("Plotting the data\n")
     # plot evolution with o cluster in trajectory
     plt.figure(figsize=(25, 10))
     plt.plot(range(1,len(clusters)+1), clusters, "o-", markersize=4)
