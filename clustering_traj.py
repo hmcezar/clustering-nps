@@ -224,7 +224,9 @@ if __name__ == '__main__':
 
   # get the elements closest to the centroid (see https://stackoverflow.com/a/39870085/3254658)
   if args.clusters_configurations:
-    if not mollist:
+    try:
+      mollist
+    except NameError:
       mollist = list(pybel.readfile(os.path.splitext(args.trajectory_file)[1][1:], args.trajectory_file))
     print("Writing superposed configurations per cluster to files %s\n" % (os.path.splitext(args.outputclusters.name)[0]+"_confs"+"_*"+"."+args.clusters_configurations))
     save_clusters_config(mollist, clusters, distmat, os.path.splitext(args.outputclusters.name)[0]+"_confs", args.clusters_configurations, args.nprocesses)
