@@ -252,12 +252,13 @@ if __name__ == '__main__':
     plt.savefig(os.path.splitext(args.outputclusters.name)[0]+"_dendrogram.pdf", bbox_inches='tight')
 
     # finds the 2D representation of the distance matrix (multidimensional scaling) and plot it
-    # plt.figure()
-    # mds = manifold.MDS(n_components=2, dissimilarity="precomputed", random_state=666, n_init=6, max_iter=300, eps=1e-3, n_jobs=args.nprocesses)
-    # coords = mds.fit_transform(squareform(distmat))
-    # plt.tick_params(axis='both', which='both', bottom='off', top='off', left='off', right='off', labelbottom='off', labelleft='off')
-    # plt.scatter(coords[:, 0], coords[:, 1], marker = 'o', c=clusters, cmap=plt.cm.nipy_spectral)
-    # plt.savefig(os.path.splitext(args.outputclusters.name)[0]+".pdf", bbox_inches='tight')
+    if args.plot_mds:
+      plt.figure()
+      mds = manifold.MDS(n_components=2, dissimilarity="precomputed", random_state=666, n_init=6, max_iter=300, eps=1e-3, n_jobs=args.nprocesses)
+      coords = mds.fit_transform(squareform(distmat))
+      plt.tick_params(axis='both', which='both', bottom='off', top='off', left='off', right='off', labelbottom='off', labelleft='off')
+      plt.scatter(coords[:, 0], coords[:, 1], marker = 'o', c=clusters, cmap=plt.cm.nipy_spectral)
+      plt.savefig(os.path.splitext(args.outputclusters.name)[0]+".pdf", bbox_inches='tight')
 
 
   # print the cluster sizes
